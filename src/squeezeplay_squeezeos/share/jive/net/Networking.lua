@@ -72,6 +72,7 @@ local Framework   = require("jive.ui.Framework")
 local Socket      = require("jive.net.Socket")
 local Process     = require("jive.net.Process")
 local Task        = require("jive.ui.Task")
+local Timer       = require("jive.ui.Timer")
 local network     = require("jiveWireless")
 
 -- Needed for network health check function
@@ -85,6 +86,9 @@ oo.class(_M, Socket)
 
 
 local SSID_TIMEOUT = 20000
+
+-- wpa_supplicant normally replies at once; don't wait forever if it doesn't
+local REQUEST_TIMEOUT = 10000
 
 -- TODO: Remove when wpsapp is replaced with WPS capable wpa_supplicant
 local wpaSupplicantRunning = true
@@ -1759,7 +1763,26 @@ function request(self, ...)
 
 	-- yield task
 	table.insert(self.responseQueue, task)
+
+	-- Without a reply the task would wait forever, and replies to later
+	-- requests would be matched to the wrong task. Closing the socket
+	-- fails all queued requests and the next request reopens it.
+	local cmd = ...
+	local timer = Timer(REQUEST_TIMEOUT,
+		function()
+			for i, t in ipairs(self.responseQueue) do
+				if t == task then
+					log:warn("no reply from wpa_supplicant for ", cmd)
+					self:close()
+					return
+				end
+			end
+		end,
+		true)
+	timer:start()
+
 	local _, reply, err = Task:yield(false)
+	timer:stop()
 
 	if not reply or err then
 		log:warn(err)

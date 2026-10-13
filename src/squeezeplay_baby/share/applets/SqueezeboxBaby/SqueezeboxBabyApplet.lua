@@ -748,8 +748,26 @@ function setDate(self, epoch)
 end
 
 
+-- consecutive failed network checks (every 5 seconds) before the network
+-- counts as down, so a single failed check doesn't force a reconnect
+local NETWORK_DOWN_CHECKS = 3
+
+
 local function _updateWirelessDone(self, iface, success)
 	local player = Player:getLocalPlayer()
+
+	-- When the network comes back after being down, connections to the
+	-- server may be stale (e.g. after the wifi driver was reloaded), so
+	-- reconnect now instead of waiting for them to time out.
+	if success then
+		if (self.networkFailures or 0) >= NETWORK_DOWN_CHECKS then
+			log:info("network is back, reconnecting to server")
+			jnt:notify("networkConnected")
+		end
+		self.networkFailures = 0
+	else
+		self.networkFailures = (self.networkFailures or 0) + 1
+	end
 
 	-- wireless
 	if iface:isWireless() then
